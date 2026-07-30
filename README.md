@@ -14,3 +14,9 @@ University of Oxford
 
 ## Overview
 
+A **lightweight aerodynamic solver** that can predict key flow behaviour much faster than conventional CFD.
+
+### Key Features
+
+- **Basic reduced-order time-marching solver**
+
