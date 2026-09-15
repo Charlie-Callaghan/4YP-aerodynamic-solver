@@ -1,5 +1,10 @@
 import numpy as np
 
+# In the following section a few things must be noted:
+# - all angles are in radians
+# - the term c_x could be meridonial c_m or axial c_z velocity
+# - positive theta is the direction of rotor rotation
+# - c_theta and w_theta are signed components
 
 # Convert shaft rotational speed from revolutions per minute (rpm)
 # to angular velocity, omega, in rad/s.
@@ -35,16 +40,16 @@ def get_c_m(m_dot: float, rho: float, A: float):
 # meridional and tangential (whirl) components.
 #
 # c^2 = c_m^2 + c_theta^2
-def get_c(c_m: float, c_theta: float):
-    return np.sqrt(c_m**2 + c_theta**2)
+def get_c(c_x: float, c_theta: float):
+    return np.sqrt(c_x**2 + c_theta**2)
 
 
 # Calculate the magnitude of the relative velocity, w, seen by a
 # rotating blade.
 #
 # w^2 = c_m^2 + w_theta^2
-def get_w(c_m: float, w_theta: float):
-    return np.sqrt(c_m**2 + w_theta**2)
+def get_w(c_x: float, w_theta: float):
+    return np.sqrt(c_x**2 + w_theta**2)
 
 
 # Calculate the absolute flow angle alpha from the absolute velocity
@@ -54,8 +59,8 @@ def get_w(c_m: float, w_theta: float):
 #
 # arctan2 is used so that the sign/quadrant of the velocity triangle
 # is handled correctly.
-def get_alpha(c_m: float, c_theta: float):
-    return np.arctan2(c_theta, c_m)
+def get_alpha(c_x: float, c_theta: float):
+    return np.arctan2(c_theta, c_x)
 
 
 # Calculate the relative flow angle beta from the relative velocity
@@ -65,16 +70,16 @@ def get_alpha(c_m: float, c_theta: float):
 #
 # beta describes the flow direction as observed in the rotating
 # reference frame of the rotor.
-def get_beta(c_m: float, w_theta: float):
-    return np.arctan2(w_theta, c_m)
+def get_beta(c_x: float, w_theta: float):
+    return np.arctan2(w_theta, c_x)
 
 
 # Calculate the tangential component of absolute velocity from the
 # absolute flow angle alpha.
 #
 # c_theta = c_m*tan(alpha)
-def get_ctheta_from_alpha(c_m: float, alpha: float):
-    return c_m * np.tan(alpha)
+def get_ctheta_from_alpha(c_x: float, alpha: float):
+    return c_x * np.tan(alpha)
 
 
 # Calculate the tangential component of absolute velocity from the
@@ -92,8 +97,8 @@ def get_ctheta_from_alpha(c_m: float, alpha: float):
 #
 # This assumes beta is treated as a signed angle according to the
 # velocity-triangle sign convention being used.
-def get_ctheta_from_beta(U: float, c_m: float, beta: float):
-    return  U + c_m * np.tan(beta)
+def get_ctheta_from_beta(U: float, c_x: float, beta: float):
+    return  U + c_x * np.tan(beta)
 
 
 # Calculate the tangential component of relative velocity.
@@ -161,8 +166,8 @@ def get_T_from_T0(T0: float, c: float, cp: float):
 # Convert static temperature to stagnation temperature.
 #
 # T0 = T + c^2/(2*cp)
-def get_T0_from_T(T: float, c: float, cp: float):
-    return T + c**2 / (2 * cp)
+def get_T0_from_T(T: float, c_x: float, c_p: float):
+    return T + c_x**2 / (2 * c_p)
 
 # Calculate density using the ideal-gas equation of state.
 #
@@ -208,6 +213,23 @@ def get_mach(c: float, T: float, gamma: float, R: float):
 def get_delta_h_from_velocity(c_1: float, c_2: float):
     return (c_2**2 - c_1**2)/2
 
+# Convert static pressure to stagnation pressure using the
+# principle of isentropic processes.
+#
+# dp/p = dT/T * gamma/(gamma - 1)
+#
+# T0/T = 1 + (gamma - 1)/2 * M^2
+#
+# therefore:
+# P0 = P * (1 + M^2 * (gamma - 1)/2) ^ (gamma/(gamma - 1))
+def get_P0_from_P(P: float, gamma: float, M: float):
+    return P * (1 + M**2 * (gamma - 1)/2) ** (gamma/(gamma - 1))
+
+# Convert stagnation pressure to static pressure.
+#
+# P = P0 / [1 + M^2 * (gamma - 1)/2) ^ (gamma/(gamma - 1)]
+def get_P_from_P0(P0: float, gamma: float, M: float):
+    return P0 / ((1 + M**2 * (gamma - 1)/2) ** (gamma/(gamma - 1)))
 
 # Calculate the magnitude of shaft power associated with the
 # stagnation enthalpy change of the fluid.
