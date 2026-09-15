@@ -1,4 +1,5 @@
 import numpy as np
+from physics.reduced_order import get_omega, get_U
 
 # Inputs
 P_01 = 1    # Total pressure at rotor inlet
