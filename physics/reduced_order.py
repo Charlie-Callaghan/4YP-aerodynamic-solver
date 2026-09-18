@@ -1,4 +1,5 @@
 import numpy as np
+from models.simple.simple_solver import FlowState
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -243,3 +244,109 @@ def get_P_from_P0(P0: float, gamma: float, M: float):
 # Units: W
 def get_power(delta_h0: float, m_dot: float):
     return abs(m_dot * delta_h0)
+
+# Iteratively solve the thermodynamic and velocity state at a single
+# turbomachinery station.
+#
+# Known quantities:
+#   m_dot   = mass flow rate [kg/s]
+#   A       = flow area [m^2]
+#   c_theta = tangential/whirl component of absolute velocity [m/s]
+#   T0      = stagnation temperature [K]
+#   P0      = stagnation pressure [Pa]
+#   gamma   = ratio of specific heats [-]
+#   R       = specific gas constant [J/(kg K)]
+#
+# Other inputs:
+# eps      = density convergence tolerance
+# max_iter = maximum permitted number of density iterations
+#
+# Returns a FlowState containing the converged static, stagnation,
+# and velocity properties at the station.
+def thermo_iter(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1000):
+
+    # Calculate the constant-pressure specific heat for a calorically
+    # perfect gas:
+    c_p = gamma * R / (gamma - 1)
+
+    # Initial guess for density [kg/m^3].
+    rho = 1
+
+    for n in range(max_iter):
+
+        # Calculate meridional velocity using conservation of mass:
+        c_m = m_dot / (rho * A)
+
+        # Calculate the magnitude of the absolute velocity from its
+        # meridional and tangential components:
+        c = np.sqrt(c_m**2 + c_theta**2)
+
+        # Convert stagnation temperature to static temperature using
+        # the steady-flow energy relationship:
+        T = T0 - c**2/(2*c_p)
+
+        # Calculate the local speed of sound using the static
+        # temperature:
+        a = np.sqrt(gamma * R * T)
+
+        # Calculate the absolute Mach number:
+        M = c/a
+
+        # Calculate static pressure from stagnation pressure using the
+        # isentropic perfect-gas stagnation/static pressure relation:
+        P = P0 / ((1 + M**2 * (gamma - 1)/2) ** (gamma/(gamma - 1)))
+
+        # Calculate a new density from the ideal-gas equation of state:
+        new_rho = P / (R * T)
+
+        # Check whether the density has converged.
+        if abs(rho - new_rho) < eps:
+            break
+
+        rho = new_rho
+
+    # Error message if exceed max iterations
+    else:
+        raise RuntimeError("Density iteration did not converge")
+
+    # Package the converged station properties into a FlowState object.
+    return FlowState(
+        P=P,
+        T=T,
+        rho=rho,
+        P0=P0,
+        T0=T0,
+        c_m=c_m,
+        c_theta=c_theta,
+        c=c,
+        M=M
+    )
+
+def solve_turbine(m_dot, A, r_1, r_2, alpha1, beta2, rho, I, tau_load, eps = 1e-12, max_iter = 1000, delta_t = 0.1):
+
+    omega = 1
+
+    for n in range(max_iter):
+
+        U_1 = get_U(omega, r_1)
+        U_2 = get_U(omega, r_2)
+
+        c_m = get_c_m(m_dot, rho, A)
+
+        c_theta1 = get_ctheta_from_alpha(c_m, alpha1)
+        c_theta2 = get_ctheta_from_beta(U_2, c_m, beta2)
+
+        delta_h0 = get_delta_h0(U_1, U_2, c_theta1, c_theta2)
+
+        W_s_dot = get_power(delta_h0, m_dot)
+
+        domega_dt = (- m_dot/omega * delta_h0 - tau_load)/I
+
+        omega_new = omega + delta_t * domega_dt
+
+        omega = omega_new
+
+    return FlowState(
+            rho=rho,
+            c_m=c_m,
+        )
