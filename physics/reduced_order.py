@@ -167,8 +167,8 @@ def get_T_from_T0(T0: float, c: float, cp: float):
 # Convert static temperature to stagnation temperature.
 #
 # T0 = T + c^2/(2*cp)
-def get_T0_from_T(T: float, c_x: float, c_p: float):
-    return T + c_x**2 / (2 * c_p)
+def get_T0_from_T(T: float, c: float, c_p: float):
+    return T + c**2 / (2 * c_p)
 
 # Calculate density using the ideal-gas equation of state.
 #
@@ -214,7 +214,7 @@ def get_mach(c: float, T: float, gamma: float, R: float):
 def get_delta_h_from_velocity(c_1: float, c_2: float):
     return (c_2**2 - c_1**2)/2
 
-def get_P2_from_P1(P_01: float, T_02: float, T_01: float, gamma: float):
+def get_P02_from_P01(P_01: float, T_02: float, T_01: float, gamma: float):
     return P_01 * (T_02/T_01)**(gamma/(gamma-1))
 
 # Convert static pressure to stagnation pressure using the
@@ -238,11 +238,8 @@ def get_P_from_P0(P0: float, gamma: float, M: float):
 # Calculate the magnitude of shaft power associated with the
 # stagnation enthalpy change of the fluid.
 #
-# |Power| = |m_dot*delta_h0|
+# |Power| = m_dot*delta_h0
 #
-# abs() means this function always returns a positive power magnitude,
-# regardless of whether the machine is operating as a compressor
-# (delta_h0 > 0) or turbine (delta_h0 < 0).
 #
 # Units: W
 def get_power(delta_h0: float, m_dot: float):
@@ -304,6 +301,7 @@ def solve_station(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1
 
         # Check whether the density has converged.
         if abs(rho - new_rho) < eps:
+            rho = new_rho
             break
 
         rho = new_rho
@@ -321,7 +319,6 @@ def solve_station(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1
         T0=T0,
         c_x=c_x,
         c_theta=c_theta,
-        c=c,
         M=M
     )
 
@@ -357,7 +354,6 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 
     # Fluid variables
     gamma = fluid.gamma
-    R = fluid.gamma
     c_p = fluid.c_p
 
     # Shaft speed
@@ -371,7 +367,7 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 
     # Update stagnations thermodynamic states
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
-    P_02 = get_P2_from_P1(P_01, T_02, T_01, gamma)
+    P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
 
     # Package the results into a RotorResults object
     return RotorResults(
@@ -395,8 +391,8 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams):
 
     # Inlet variables
     c_z = inlet.c_x
-    P_01 = FlowState.P0
-    T_01 = FlowState.T0
+    P_01 = inlet.P0
+    T_01 = inlet.T0
 
     # Blade variables
     alpha2 = blade.alpha
@@ -441,7 +437,6 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
     # Blade variables
     r_1 = blade.r_1
     r_2 = blade.r_2
-    alpha1 = blade.alpha
     beta2 = blade.beta
     omega = 2 * np.pi * blade.N / 60
 
@@ -462,7 +457,7 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 
     # Update thermodynamic stagnation states
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
-    P_02 = get_P2_from_P1(P_01, T_02, T_01, gamma)
+    P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
 
     # Package the results into a RotorResults object
     return RotorResults(
@@ -486,8 +481,8 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams):
 
     # Inlet variables
     c_m = inlet.c_x
-    P_01 = FlowState.P0
-    T_01 = FlowState.T0
+    P_01 = inlet.P0
+    T_01 = inlet.T0
 
     # Blade variables
     alpha2 = blade.alpha

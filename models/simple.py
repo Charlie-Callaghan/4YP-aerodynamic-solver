@@ -8,8 +8,8 @@ class FlowState:
     rho: float  # Density
     P0: float   # Stagnation pressure
     T0: float   # Stagnation temperature
-    c_x: float  # Relative axial/meridional velocity
-    c_theta: float  # Relative whirl velocity
+    c_x: float  # Absolute axial/meridional velocity
+    c_theta: float  # Absolute whirl velocity
     M: float    # Mach number
     alpha: float    # Inlet angle
     beta: float     # Exit angle
@@ -46,9 +46,9 @@ class BladeParams:
     beta: float  # Exit angle
     c: float    # Chord length
     s: float    # Blade Pitch
-    r_1: float = None
-    r_2: float = None
-    r_m: float = None   # Mean radius
     A: float    # Flow path area
     h: float    # Blade height
     N: float    # Rotational speed
+    r_1: float = None
+    r_2: float = None
+    r_m: float = None   # Mean radius
