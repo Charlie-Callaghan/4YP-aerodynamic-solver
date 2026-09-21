@@ -243,7 +243,7 @@ def get_P_from_P0(P0: float, gamma: float, M: float):
 #
 # Units: W
 def get_power(delta_h0: float, m_dot: float):
-    return abs(m_dot * delta_h0)
+    return m_dot * delta_h0
 
 # Iteratively solve the thermodynamic and velocity state at a single
 # turbomachinery station.
@@ -263,7 +263,7 @@ def get_power(delta_h0: float, m_dot: float):
 #
 # Returns a FlowState containing the converged static, stagnation,
 # and velocity properties at the station.
-def thermo_iter(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1000):
+def solve_station(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1000):
 
     # Calculate the constant-pressure specific heat for a calorically
     # perfect gas:
@@ -275,11 +275,11 @@ def thermo_iter(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 100
     for n in range(max_iter):
 
         # Calculate meridional velocity using conservation of mass:
-        c_m = m_dot / (rho * A)
+        c_x = m_dot / (rho * A)
 
         # Calculate the magnitude of the absolute velocity from its
         # meridional and tangential components:
-        c = np.sqrt(c_m**2 + c_theta**2)
+        c = np.sqrt(c_x**2 + c_theta**2)
 
         # Convert stagnation temperature to static temperature using
         # the steady-flow energy relationship:
@@ -316,20 +316,34 @@ def thermo_iter(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 100
         rho=rho,
         P0=P0,
         T0=T0,
-        c_m=c_m,
+        c_x=c_x,
         c_theta=c_theta,
         c=c,
         M=M
     )
 
-def solve_turbine(m_dot, A, r_1, r_2, alpha1, beta2, rho, I, tau_load, eps = 1e-12, max_iter = 1000, delta_t = 0.1):
+def solve_turbine(m_dot, A, r_1, r_2, alpha1, beta2, rho, I, tau_load, omega_init, n_steps = 1000, delta_t = 0.1):
 
-    omega = 1
+    omega = omega_init
 
-    for n in range(max_iter):
+    vals = {
+        "time_step": [],
+        "omega_val": [],
+        "U_1_val": [],
+        "U_2_val": [],
+        "c_theta1_val": [],
+        "c_theta2_val": [],
+        "delta_h0_val": [],
+        "W_s_dot_val": [],
+        "domega_dt_val": []
+    }
 
-        U_1 = get_U(omega, r_1)
-        U_2 = get_U(omega, r_2)
+    for n in range(n_steps):
+
+        time = n * delta_t
+
+        U_1 = get_U(r_1, omega)
+        U_2 = get_U(r_2, omega)
 
         c_m = get_c_m(m_dot, rho, A)
 
@@ -340,13 +354,73 @@ def solve_turbine(m_dot, A, r_1, r_2, alpha1, beta2, rho, I, tau_load, eps = 1e-
 
         W_s_dot = get_power(delta_h0, m_dot)
 
-        domega_dt = (- m_dot/omega * delta_h0 - tau_load)/I
+        domega_dt = (- W_s_dot/omega - tau_load)/I
+
+        vals["time_step"].append(time)
+        vals["omega_val"].append(omega)
+        vals["U_1_val"].append(U_1)
+        vals["U_2_val"].append(U_2)
+        vals["c_theta1_val"].append(c_theta1)
+        vals["c_theta2_val"].append(c_theta2)
+        vals["delta_h0_val"].append(delta_h0)
+        vals["W_s_dot_val"].append(W_s_dot)
+        vals["domega_dt_val"].append(domega_dt)
 
         omega_new = omega + delta_t * domega_dt
 
         omega = omega_new
 
-    return FlowState(
-            rho=rho,
-            c_m=c_m,
-        )
+    for key in vals:
+        vals[key] = np.array(vals[key])
+
+    return vals
+
+def solve_compressor(m_dot, A, r_m, alpha1, beta2, rho, I, tau_load, omega_init, n_steps = 1000, delta_t = 0.1):
+
+    omega = omega_init
+
+    vals = {
+        "time_step": [],
+        "omega_val": [],
+        "U_val": [],
+        "c_theta1_val": [],
+        "c_theta2_val": [],
+        "delta_h0_val": [],
+        "W_s_dot_val": [],
+        "domega_dt_val": []
+    }
+
+    for n in range(n_steps):
+
+        time = n * delta_t
+
+        U = omega * r_m
+
+        c_z = get_c_m(m_dot, rho, A)
+
+        c_theta1 = get_ctheta_from_alpha(c_z, alpha1)
+        c_theta2 = get_ctheta_from_beta(U, c_z, beta2)
+
+        delta_h0 = get_delta_h0(U, U, c_theta1, c_theta2)
+
+        W_s_dot = get_power(delta_h0, m_dot)
+
+        domega_dt = (W_s_dot/omega - tau_load)/I
+
+        vals["time_step"].append(time)
+        vals["omega_val"].append(omega)
+        vals["U_val"].append(U)
+        vals["c_theta1_val"].append(c_theta1)
+        vals["c_theta2_val"].append(c_theta2)
+        vals["delta_h0_val"].append(delta_h0)
+        vals["W_s_dot_val"].append(W_s_dot)
+        vals["domega_dt_val"].append(domega_dt)
+
+        omega_new = omega + delta_t * domega_dt
+
+        omega = omega_new
+
+    for key in vals:
+        vals[key] = np.array(vals[key])
+
+    return vals

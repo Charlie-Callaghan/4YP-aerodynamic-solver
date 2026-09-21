@@ -1,38 +1,54 @@
 import numpy as np
+from dataclasses import dataclass
 
+@dataclass(frozen=True)
 class FlowState:
+    P: float  # Static pressure
+    T: float  # Static temperature
+    rho: float  # Density
+    P0: float   # Stagnation pressure
+    T0: float   # Stagnation temperature
+    c_x: float  # Relative axial/meridional velocity
+    c_theta: float  # Relative whirl velocity
+    M: float    # Mach number
+    alpha: float    # Inlet angle
+    beta: float     # Exit angle
 
-    def __init__(self, P, T, rho, P0, T0, c_m, c_theta, c, w_m, w_theta, w, M, alpha, beta):
+@dataclass
+class RotorResults:
+    c_theta: float
+    delta_h0: float # Change in total enthalpy
+    P0: float
+    T0: float
 
-        # Thermodynamic properties
-        self.P = P
-        self.T = T
-        self.rho = rho
+@dataclass
+class StatorResults:
+    c_theta: float
+    P0: float
+    T0: float
 
-        self.P0 = P0
-        self.T0 = T0
-
-        # Absolute velocity
-        self.c_m = c_m
-        self.c_theta = c_theta
-        self.c = c
-
-        # Relative velocity
-        self.w_m = w_m
-        self.w_theta = w_theta
-        self.w = w
-
-        # Flow properties
-        self.M = M
-
-        # Angles
-        self.alpha = alpha
-        self.beta = beta
-
+@dataclass(frozen=True)
 class IdealGas:
+    gamma: float
+    R: float
 
-    def __init__(self, gamma = 1.4, R = 287):
+    @property
+    def c_p(self):  # Specific heat capacity at constant pressure
+        return self.gamma * self.R/(self.gamma - 1)
 
-        self.gamma = gamma
-        self.R = R
-        self.c_p = gamma * R / (gamma - 1)
+    @property
+    def c_v(self):  # Specific heat capacity at constant volume
+        return self.c_p - self.R
+
+@dataclass(frozen=True)
+class BladeParams:
+    alpha: float  # Inlet angle
+    beta: float  # Exit angle
+    c: float    # Chord length
+    s: float    # Blade Pitch
+    r_1: float = None
+    r_2: float = None
+    r_m: float = None   # Mean radius
+    A: float    # Flow path area
+    h: float    # Blade height
+    N: float    # Rotational speed
