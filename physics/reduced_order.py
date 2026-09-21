@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple.simple_solver import FlowState
+from models.simple import FlowState,BladeParams,IdealGas,RotorResults,StatorResults
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -109,7 +109,7 @@ def get_ctheta_from_beta(U: float, c_x: float, beta: float):
 #
 # therefore:
 # w_theta = c_theta - U
-def get_w_theta(c_theta: float, U: float):
+def get_w_theta_from_c_theta(c_theta: float, U: float):
     return c_theta - U
 
 
@@ -117,7 +117,7 @@ def get_w_theta(c_theta: float, U: float):
 # relative tangential velocity and blade speed.
 #
 # c_theta = w_theta + U
-def get_c_theta(w_theta: float, U: float):
+def get_c_theta_from_w_theta(w_theta: float, U: float):
     return w_theta + U
 
 
@@ -142,11 +142,11 @@ def get_delta_h0(U_1: float, U_2: float, c_theta1: float, c_theta2: float):
 # delta_h0 = cp*delta_T0
 #
 # therefore:
-# T_new = T + delta_h0/cp
+# T02 = T01 + delta_h0/cp
 #
 # For a compressor delta_h0 is positive, while for a turbine it is
 # negative under the adopted sign convention.
-def get_T0(T: float, delta_h0: float, c_p: float):
+def get_T02_from_T01(T: float, delta_h0: float, c_p: float):
     return T + delta_h0/c_p
 
 
@@ -213,6 +213,9 @@ def get_mach(c: float, T: float, gamma: float, R: float):
 # stationary blade rows such as stators, nozzles and diffusers.
 def get_delta_h_from_velocity(c_1: float, c_2: float):
     return (c_2**2 - c_1**2)/2
+
+def get_P2_from_P1(P_01: float, T_02: float, T_01: float, gamma: float):
+    return P_01 * (T_02/T_01)**(gamma/(gamma-1))
 
 # Convert static pressure to stagnation pressure using the
 # principle of isentropic processes.
@@ -322,105 +325,183 @@ def solve_station(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1
         M=M
     )
 
-def solve_turbine(m_dot, A, r_1, r_2, alpha1, beta2, rho, I, tau_load, omega_init, n_steps = 1000, delta_t = 0.1):
+# Solve the thermodynamic and velocity state across a single axial
+# turbomachinery rotor.
+#
+# Known quantities:
+#   m_dot   = mass flow rate [kg/s]
+#   A       = flow area [m^2]
+#   c_theta = tangential/whirl component of absolute velocity [m/s]
+#   T0      = stagnation temperature [K]
+#   P0      = stagnation pressure [Pa]
+#   gamma   = ratio of specific heats [-]
+#   R       = specific gas constant [J/(kg K)]
+#   omega   = rotor angular velocity [rad/s]
+#   r_m     = rotor mean radius [m]
+#   beta    = rotor exit angle [rad]
+#
+# Returns a RotorResults object containing the stagnation,
+# and velocity properties at the rotor exit.
+def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 
-    omega = omega_init
+    # Inlet variables
+    c_z = inlet.c_x
+    P_01 = inlet.P0
+    T_01 = inlet.T0
+    c_theta1 = inlet.c_theta
 
-    vals = {
-        "time_step": [],
-        "omega_val": [],
-        "U_1_val": [],
-        "U_2_val": [],
-        "c_theta1_val": [],
-        "c_theta2_val": [],
-        "delta_h0_val": [],
-        "W_s_dot_val": [],
-        "domega_dt_val": []
-    }
+    # Blade variables
+    omega = blade.N * 2 * np.pi / 60
+    r_m = blade.r_m
+    beta2 = blade.beta
 
-    for n in range(n_steps):
+    # Fluid variables
+    gamma = fluid.gamma
+    R = fluid.gamma
+    c_p = fluid.c_p
 
-        time = n * delta_t
+    # Shaft speed
+    U = get_U(r_m, omega)
 
-        U_1 = get_U(r_1, omega)
-        U_2 = get_U(r_2, omega)
+    # Velocity triangles
+    c_theta2 = get_ctheta_from_beta(U, c_z, beta2)
 
-        c_m = get_c_m(m_dot, rho, A)
+    # Euler's equation
+    delta_h0 = get_delta_h0(U, U, c_theta1, c_theta2)
 
-        c_theta1 = get_ctheta_from_alpha(c_m, alpha1)
-        c_theta2 = get_ctheta_from_beta(U_2, c_m, beta2)
+    # Update stagnations thermodynamic states
+    T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
+    P_02 = get_P2_from_P1(P_01, T_02, T_01, gamma)
 
-        delta_h0 = get_delta_h0(U_1, U_2, c_theta1, c_theta2)
+    # Package the results into a RotorResults object
+    return RotorResults(
+        c_theta=c_theta2,
+        delta_h0=delta_h0,
+        P0=P_02,
+        T0=T_02
+    )
 
-        W_s_dot = get_power(delta_h0, m_dot)
+# Solve the thermodynamic and velocity state across a single axial
+# turbomachinery stator.
+#
+# Known quantities:
+#   T0      = stagnation temperature [K]
+#   P0      = stagnation pressure [Pa]
+#   alpha   = stator inlet angle [rad]
+#
+# Returns a StatorResults object containing the stagnation,
+# and velocity properties at the rotor exit.
+def solve_axial_stator(inlet: FlowState, blade: BladeParams):
 
-        domega_dt = (- W_s_dot/omega - tau_load)/I
+    # Inlet variables
+    c_z = inlet.c_x
+    P_01 = FlowState.P0
+    T_01 = FlowState.T0
 
-        vals["time_step"].append(time)
-        vals["omega_val"].append(omega)
-        vals["U_1_val"].append(U_1)
-        vals["U_2_val"].append(U_2)
-        vals["c_theta1_val"].append(c_theta1)
-        vals["c_theta2_val"].append(c_theta2)
-        vals["delta_h0_val"].append(delta_h0)
-        vals["W_s_dot_val"].append(W_s_dot)
-        vals["domega_dt_val"].append(domega_dt)
+    # Blade variables
+    alpha2 = blade.alpha
 
-        omega_new = omega + delta_t * domega_dt
+    # Velocity triangles
+    c_theta2 = get_ctheta_from_alpha(c_z, alpha2)
 
-        omega = omega_new
+    # Update thermodynamic stagnation states
+    T_02 = T_01
+    P_02 = P_01
 
-    for key in vals:
-        vals[key] = np.array(vals[key])
+    # Package the results into a StatorResults object
+    return StatorResults(
+        c_theta=c_theta2,
+        P0=P_02,
+        T0=T_02
+    )
 
-    return vals
+# Solve the thermodynamic and velocity state across a single axial
+# turbomachinery rotor.
+#
+# Known quantities:
+#   c_theta = tangential/whirl component of absolute velocity [m/s]
+#   T0      = stagnation temperature [K]
+#   P0      = stagnation pressure [Pa]
+#   gamma   = ratio of specific heats [-]
+#   R       = specific gas constant [J/(kg K)]
+#   omega   = rotor angular velocity [rad/s]
+#   r_m     = rotor mean radius [m]
+#   beta    = rotor exit angle [rad]
+#
+# Returns a RotorResults object containing the stagnation,
+# and velocity properties at the rotor exit.
+def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 
-def solve_compressor(m_dot, A, r_m, alpha1, beta2, rho, I, tau_load, omega_init, n_steps = 1000, delta_t = 0.1):
+    # Inlet variables
+    c_m = inlet.c_x
+    P_01 = inlet.P0
+    T_01 = inlet.T0
+    c_theta1 = inlet.c_theta
 
-    omega = omega_init
+    # Blade variables
+    r_1 = blade.r_1
+    r_2 = blade.r_2
+    alpha1 = blade.alpha
+    beta2 = blade.beta
+    omega = 2 * np.pi * blade.N / 60
 
-    vals = {
-        "time_step": [],
-        "omega_val": [],
-        "U_val": [],
-        "c_theta1_val": [],
-        "c_theta2_val": [],
-        "delta_h0_val": [],
-        "W_s_dot_val": [],
-        "domega_dt_val": []
-    }
+    # Fluid variables
+    gamma = fluid.gamma
+    R = fluid.R
+    c_p = fluid.c_p
 
-    for n in range(n_steps):
+    # Shaft speed
+    U_1 = get_U(r_1, omega)
+    U_2 = get_U(r_2, omega)
 
-        time = n * delta_t
+    # Velocity triangles
+    c_theta2 = get_ctheta_from_beta(U_2, c_m, beta2)
 
-        U = omega * r_m
+    # Euler's equation
+    delta_h0 = get_delta_h0(U_1, U_2, c_theta1, c_theta2)
 
-        c_z = get_c_m(m_dot, rho, A)
+    # Update thermodynamic stagnation states
+    T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
+    P_02 = get_P2_from_P1(P_01, T_02, T_01, gamma)
 
-        c_theta1 = get_ctheta_from_alpha(c_z, alpha1)
-        c_theta2 = get_ctheta_from_beta(U, c_z, beta2)
+    # Package the results into a RotorResults object
+    return RotorResults(
+        c_theta=c_theta2,
+        delta_h0=delta_h0,
+        P0=P_02,
+        T0=T_02
+    )
 
-        delta_h0 = get_delta_h0(U, U, c_theta1, c_theta2)
+# Solve the thermodynamic and velocity state across a single radial
+# turbomachinery nozzle/diffuser.
+#
+# Known quantities:
+#   T0      = stagnation temperature [K]
+#   P0      = stagnation pressure [Pa]
+#   alpha   = stator inlet angle [rad]
+#
+# Returns a StatorResults object containing the stagnation,
+# and velocity properties at the rotor exit.
+def solve_radial_stator(inlet: FlowState, blade: BladeParams):
 
-        W_s_dot = get_power(delta_h0, m_dot)
+    # Inlet variables
+    c_m = inlet.c_x
+    P_01 = FlowState.P0
+    T_01 = FlowState.T0
 
-        domega_dt = (W_s_dot/omega - tau_load)/I
+    # Blade variables
+    alpha2 = blade.alpha
 
-        vals["time_step"].append(time)
-        vals["omega_val"].append(omega)
-        vals["U_val"].append(U)
-        vals["c_theta1_val"].append(c_theta1)
-        vals["c_theta2_val"].append(c_theta2)
-        vals["delta_h0_val"].append(delta_h0)
-        vals["W_s_dot_val"].append(W_s_dot)
-        vals["domega_dt_val"].append(domega_dt)
+    # Velocity triangles
+    c_theta2 = get_ctheta_from_alpha(c_m, alpha2)
 
-        omega_new = omega + delta_t * domega_dt
+    # Update thermodynamic stagnation states
+    T_02 = T_01
+    P_02 = P_01
 
-        omega = omega_new
-
-    for key in vals:
-        vals[key] = np.array(vals[key])
-
-    return vals
+    # Package the results into a StatorResults object
+    return StatorResults(
+        c_theta=c_theta2,
+        P0=P_02,
+        T0=T_02
+    )
