@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,RotorResults,StatorResults, MachineType, FlowGeometry
+from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -251,11 +251,13 @@ def get_power(delta_h0: float, m_dot: float):
 # PR = P0_out/P0_in  for compressors
 #
 # Unit: -
-def get_pressure_ratio(P0_in: float, P0_out: float):
-    if P0_in>P0_out:
+def get_pressure_ratio(P0_in: float, P0_out: float, machine_type):
+    if machine_type == MachineType.TURBINE:
         return P0_in/P0_out
-    else:
+    elif machine_type == MachineType.COMPRESSOR:
         return P0_out/P0_in
+    else:
+        raise RuntimeError("Machine type not defined")
 
 # Calculate the rotor torque
 #
@@ -287,6 +289,9 @@ def get_efficiency(h02s: float, h02: float, h01: float, machine_type):
 
     elif machine_type == MachineType.TURBINE:
         return (h01 - h02) / (h01 - h02s)
+
+    else:
+        raise RuntimeError("Machine type not defined")
 
 # Iteratively solve the thermodynamic and velocity state at a single
 # turbomachinery station.
@@ -426,11 +431,14 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
 
     # Package the results into a RotorResults object
-    return RotorResults(
+    return ComponentResults(
+        outlet= FlowState(
         c_theta=c_theta2,
-        delta_h0=delta_h0,
         P0=P_02,
         T0=T_02
+        ),
+        omega=omega,
+        delta_h0=delta_h0
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -461,10 +469,12 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams):
     P_02 = P_01
 
     # Package the results into a StatorResults object
-    return StatorResults(
+    return ComponentResults(
+        outlet= FlowState(
         c_theta=c_theta2,
         P0=P_02,
         T0=T_02
+        )
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -516,11 +526,14 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
 
     # Package the results into a RotorResults object
-    return RotorResults(
+    return ComponentResults(
+        outlet= FlowState(
         c_theta=c_theta2,
-        delta_h0=delta_h0,
         P0=P_02,
         T0=T_02
+        ),
+        omega=omega,
+        delta_h0=delta_h0
     )
 
 # Solve the thermodynamic and velocity state across a single radial
@@ -551,8 +564,100 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams):
     P_02 = P_01
 
     # Package the results into a StatorResults object
-    return StatorResults(
+    return ComponentResults(
+        outlet= FlowState(
         c_theta=c_theta2,
         P0=P_02,
         T0=T_02
+        )
+    )
+
+def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_params: TimeParams, machine_type, flow_geometry):
+
+    n_steps = time_params.n_steps
+
+    for n in range(n_steps):
+
+        station_1 = solve_station(inlet, blade, fluid)
+
+        if machine_type == MachineType.COMPRESSOR:
+
+            if flow_geometry == FlowGeometry.AXIAL:
+
+                compressor_rotor = solve_axial_rotor(station_1, blade, fluid)
+
+                omega = compressor_rotor.omega
+                delta_h0 = compressor_rotor.delta_h0
+
+                station_2 = solve_station(compressor_rotor, blade, fluid)
+
+                compressor_stator = solve_axial_stator(station_2, blade)
+
+                station_3 = solve_station(compressor_stator, blade, fluid)
+                m_dot = station_3.m_dot
+
+            elif flow_geometry == FlowGeometry.RADIAL:
+
+                compressor_rotor = solve_radial_rotor(station_1, blade, fluid)
+
+                omega = compressor_rotor.omega
+                delta_h0 = compressor_rotor.delta_h0
+
+                station_2 = solve_station(compressor_rotor, blade, fluid)
+
+                compressor_stator = solve_radial_stator(station_2, blade)
+
+                station_3 = solve_station(compressor_stator, blade, fluid)
+                m_dot = station_3.m_dot
+
+            raise RuntimeError("Flow type not defined")
+
+        elif machine_type == MachineType.TURBINE:
+
+            if flow_geometry == FlowGeometry.AXIAL:
+
+                turbine_stator = solve_axial_stator(station_1, blade)
+
+                station_2 = solve_station(turbine_stator, blade, fluid)
+
+                turbine_rotor = solve_axial_rotor(station_2, blade, fluid)
+
+                omega = turbine_rotor.omega
+                delta_h0 = turbine_rotor.delta_h0
+
+                station_3 = solve_station(turbine_rotor, blade, fluid)
+                m_dot = station_3.m_dot
+
+            elif flow_geometry == FlowGeometry.RADIAL:
+
+                turbine_stator = solve_radial_stator(station_1, blade)            
+
+                station_2 = solve_station(compressor_rotor, blade, fluid)
+
+                turbine_rotor = solve_radial_rotor(station_2, blade, fluid)
+
+                omega = turbine_rotor.omega
+                delta_h0 = turbine_rotor.delta_h0
+
+                station_3 = solve_station(compressor_stator, blade, fluid)
+                m_dot = station_3.m_dot
+
+            raise RuntimeError("Flow type not defined")
+
+        power = get_power(delta_h0, m_dot)
+        torque = get_torque(power, omega)
+
+        tau_load = blade.tau_load
+        I = blade.I
+
+        delta_t = time_params.delta_t
+
+        domega_dt = (torque - tau_load) / I
+
+        omega_new = omega + delta_t * domega_dt
+
+        omega = omega_new
+
+    return FlowState(
+        omega=omega
     )

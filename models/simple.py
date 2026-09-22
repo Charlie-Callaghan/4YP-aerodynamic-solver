@@ -17,17 +17,12 @@ class FlowState:
     m_dot: float    # Flow rate
 
 @dataclass(frozen=True)
-class RotorResults:
-    c_theta: float
-    delta_h0: float # Change in total enthalpy
-    P0: float
-    T0: float
-
-@dataclass(frozen=True)
-class StatorResults:
-    c_theta: float
-    P0: float
-    T0: float
+class ComponentResults:
+    outlet: FlowState
+    omega: float = 0.0
+    delta_h0: float = 0.0 # Change in total enthalpy
+    Power: float = 0.0
+    Torque: float = 0.0
 
 @dataclass(frozen=True)
 class IdealGas:
@@ -51,6 +46,8 @@ class BladeParams:
     A: float    # Flow path area
     h: float    # Blade height
     N: float    # Rotational speed
+    tau_load: float
+    I: float
     r_1: float = None
     r_2: float = None
     r_m: float = None   # Mean radius
@@ -68,3 +65,8 @@ class FlowGeometry(Enum):
 class Machine:
     machine_type: MachineType
     flow_geometry: FlowGeometry
+
+@dataclass
+class TimeParams:
+    delta_t: float
+    n_steps: float
