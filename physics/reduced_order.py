@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,RotorResults,StatorResults
+from models.simple import FlowState,BladeParams,IdealGas,RotorResults,StatorResults, MachineType, FlowGeometry
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -245,6 +245,49 @@ def get_P_from_P0(P0: float, gamma: float, M: float):
 def get_power(delta_h0: float, m_dot: float):
     return m_dot * delta_h0
 
+# Calculate the pressure ratio across a bladerow
+#
+# PR = P0_in/P0_out  for turbines
+# PR = P0_out/P0_in  for compressors
+#
+# Unit: -
+def get_pressure_ratio(P0_in: float, P0_out: float):
+    if P0_in>P0_out:
+        return P0_in/P0_out
+    else:
+        return P0_out/P0_in
+
+# Calculate the rotor torque
+#
+# tau = W_dot / omega
+#
+# Units: Nm
+def get_torque(W_dot: float, omega: float):
+    return W_dot/omega
+
+# Calculate h02s under isentropic compression
+# 
+# s02s = s01
+# h02s = c_p * T01 * (P02/P01)^(gamma/(gamma-1))
+#
+# Units: J/kg
+def get_h02s(T01:float, P02: float, P01: float, c_p: float, gamma: float):
+    return c_p * T01 * (P02/P01)**(gamma/(gamma-1))
+
+# Calculate efficiency for either compressors or turbines
+#
+# eta = (h02s - h01) / (h02 - h01)  compressor
+# eta = (h01 - h02) / (h01 - h02s)  turbine
+#
+# Units: -
+def get_efficiency(h02s: float, h02: float, h01: float, machine_type):
+
+    if machine_type == MachineType.COMPRESSOR:
+        return (h02s - h01) / (h02 - h01)
+
+    elif machine_type == MachineType.TURBINE:
+        return (h01 - h02) / (h01 - h02s)
+
 # Iteratively solve the thermodynamic and velocity state at a single
 # turbomachinery station.
 #
@@ -263,7 +306,20 @@ def get_power(delta_h0: float, m_dot: float):
 #
 # Returns a FlowState containing the converged static, stagnation,
 # and velocity properties at the station.
-def solve_station(m_dot, A, c_theta, T0, P0, gamma, R, eps = 1e-12, max_iter = 1000):
+def solve_station(inlet: FlowState, blade: BladeParams, fluid: IdealGas, eps = 1e-12, max_iter = 1000):
+
+    # Inlet variables
+    m_dot = inlet.m_dot
+    c_theta = inlet.c_theta
+    T0 = inlet.T0
+    P0 = inlet.P0
+
+    # Blade variables
+    A = blade.A
+
+    # Fluid variables
+    gamma = fluid.gamma
+    R = fluid.R
 
     # Calculate the constant-pressure specific heat for a calorically
     # perfect gas:

@@ -1,5 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
+from enum import Enum
 
 @dataclass(frozen=True)
 class FlowState:
@@ -13,15 +14,16 @@ class FlowState:
     M: float    # Mach number
     alpha: float    # Inlet angle
     beta: float     # Exit angle
+    m_dot: float    # Flow rate
 
-@dataclass
+@dataclass(frozen=True)
 class RotorResults:
     c_theta: float
     delta_h0: float # Change in total enthalpy
     P0: float
     T0: float
 
-@dataclass
+@dataclass(frozen=True)
 class StatorResults:
     c_theta: float
     P0: float
@@ -52,3 +54,17 @@ class BladeParams:
     r_1: float = None
     r_2: float = None
     r_m: float = None   # Mean radius
+
+class MachineType(Enum):
+    COMPRESSOR = "compressor"
+    TURBINE = "turbine"
+
+class FlowGeometry(Enum):
+    AXIAL = "axial"
+    RADIAL = "radial"
+    MIXED = "mixed"
+
+@dataclass
+class Machine:
+    machine_type: MachineType
+    flow_geometry: FlowGeometry
