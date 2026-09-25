@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams
+from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -589,12 +589,11 @@ def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_pa
                 omega = compressor_rotor.omega
                 delta_h0 = compressor_rotor.delta_h0
 
-                station_2 = solve_station(compressor_rotor, blade, fluid)
+                station_2 = solve_station(compressor_rotor.outlet, blade, fluid)
 
                 compressor_stator = solve_axial_stator(station_2, blade)
 
-                station_3 = solve_station(compressor_stator, blade, fluid)
-                m_dot = station_3.m_dot
+                station_3 = solve_station(compressor_stator.outlet, blade, fluid)
 
             elif flow_geometry == FlowGeometry.RADIAL:
 
@@ -603,14 +602,14 @@ def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_pa
                 omega = compressor_rotor.omega
                 delta_h0 = compressor_rotor.delta_h0
 
-                station_2 = solve_station(compressor_rotor, blade, fluid)
+                station_2 = solve_station(compressor_rotor.outlet, blade, fluid)
 
                 compressor_stator = solve_radial_stator(station_2, blade)
 
-                station_3 = solve_station(compressor_stator, blade, fluid)
-                m_dot = station_3.m_dot
+                station_3 = solve_station(compressor_stator.outlet, blade, fluid)
 
-            raise RuntimeError("Flow type not defined")
+            else:
+                raise RuntimeError("Flow type not defined")
 
         elif machine_type == MachineType.TURBINE:
 
@@ -618,31 +617,35 @@ def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_pa
 
                 turbine_stator = solve_axial_stator(station_1, blade)
 
-                station_2 = solve_station(turbine_stator, blade, fluid)
+                station_2 = solve_station(turbine_stator.outlet, blade, fluid)
 
                 turbine_rotor = solve_axial_rotor(station_2, blade, fluid)
 
                 omega = turbine_rotor.omega
                 delta_h0 = turbine_rotor.delta_h0
 
-                station_3 = solve_station(turbine_rotor, blade, fluid)
-                m_dot = station_3.m_dot
+                station_3 = solve_station(turbine_rotor.outlet, blade, fluid)
 
             elif flow_geometry == FlowGeometry.RADIAL:
 
                 turbine_stator = solve_radial_stator(station_1, blade)            
 
-                station_2 = solve_station(compressor_rotor, blade, fluid)
+                station_2 = solve_station(turbine_rotor.outlet, blade, fluid)
 
                 turbine_rotor = solve_radial_rotor(station_2, blade, fluid)
 
                 omega = turbine_rotor.omega
                 delta_h0 = turbine_rotor.delta_h0
 
-                station_3 = solve_station(compressor_stator, blade, fluid)
-                m_dot = station_3.m_dot
+                station_3 = solve_station(turbine_stator.outlet, blade, fluid)
 
-            raise RuntimeError("Flow type not defined")
+            else:
+                raise RuntimeError("Flow type not defined")
+
+        else:
+            raise RuntimeError("Machine type not defined")
+
+        m_dot = inlet.m_dot
 
         power = get_power(delta_h0, m_dot)
         torque = get_torque(power, omega)
@@ -658,6 +661,7 @@ def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_pa
 
         omega = omega_new
 
-    return FlowState(
+    return SystemState(
+        outlet=station_3,
         omega=omega
     )

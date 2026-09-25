@@ -1,4 +1,3 @@
-import numpy as np
 from dataclasses import dataclass
 from enum import Enum
 
@@ -61,12 +60,19 @@ class FlowGeometry(Enum):
     RADIAL = "radial"
     MIXED = "mixed"
 
-@dataclass
+@dataclass(frozen=True)
 class Machine:
     machine_type: MachineType
     flow_geometry: FlowGeometry
 
-@dataclass
+@dataclass(frozen=True)
 class TimeParams:
     delta_t: float
     n_steps: float
+
+@dataclass(frozen=True)
+class SystemState:
+    outlet: FlowState
+    omega: float
+    m: float = 0.0
+    E: float = 0.0
