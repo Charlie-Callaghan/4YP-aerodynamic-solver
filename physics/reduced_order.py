@@ -1,11 +1,12 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState
+from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState, ControlVolume, Derivatives
 
 # In the following section a few things must be noted:
 # - all angles are in radians
 # - the term c_x could be meridonial c_m or axial c_z velocity
 # - positive theta is the direction of rotor rotation
 # - c_theta and w_theta are signed components
+
 
 # Convert shaft rotational speed from revolutions per minute (rpm)
 # to angular velocity, omega, in rad/s.
@@ -293,11 +294,80 @@ def get_efficiency(h02s: float, h02: float, h01: float, machine_type):
     else:
         raise RuntimeError("Machine type not defined")
 
-# Iteratively solve the thermodynamic and velocity state at a single
-# turbomachinery station.
+# Calculate P, T and rho from state variables
+#
+# rho = m/V
+# T = E/(m*c_v)
+# P = rho*R*T
+#
+# Units: kg/m^3, k, Pa
+def get_state_from_conserved(m: float, E: float, V: float, R: float, c_v: float):
+
+    # Calculate rho, P and T
+    rho = m/V
+    T = E/(m*c_v)
+    P = rho*R*T
+
+    return FlowState(
+        rho=rho,
+        P=P,
+        T=T
+    )    
+
+# Find m_dot from continuity
+#
+# m_dot = rho * A * c_x
+#
+# units: kg/s
+def get_m_dot_from_continuity(rho: float, A: float, c_x: float):
+    return rho*A*c_x
+
+# Find m_dot_out from algebraic formula
+#
+# m_dot_out = K * sqrt(P - P_d)
+#
+# units: kg/s
+def get_m_dot_out(K: float, P: float, P_d: float):
+    return K * np.sqrt(P - P_d)
+
+# Get h0_out from enthalpy change in rotor
+#
+# h0_out = h0_in + delta_h0
+#
+# units: J/kg
+def get_h0_out(h0_in: float, delta_h0: float):
+    return h0_in + delta_h0
+
+# Find dm/dt from ODE
+#
+# dm/dt = m_dot_out - m_dot_in
+#
+# Units: kg/s
+def get_dm_dt(m_dot_in: float, m_dot_out: float):
+    return m_dot_out - m_dot_in
+
+# Find dE/dt from ODE
+#
+# dE/dt = m_dot_in*h0_in - m_dot_out*h0_out + Q_dot - W_s_dot
+#
+# Units: J/s
+def get_dE_dt(m_dot_in: float, m_dot_out: float, h0_in: float, h0_out: float, W_s_dot: float, Q_dot: float):
+    return m_dot_in*h0_in - m_dot_out*h0_out + Q_dot - W_s_dot
+
+# Find domega/dt from ODE
+#
+# domega/dt = (torque - tau_load) / I
+#
+# Units: J/s
+def get_domega_dt(torque: float, tau_load: float, I: float):
+    return (torque - tau_load) / I
+
+
+
+# Non iterative function that returns the thermodynamic state from system
+# state and inlet variables
 #
 # Known quantities:
-#   m_dot   = mass flow rate [kg/s]
 #   A       = flow area [m^2]
 #   c_theta = tangential/whirl component of absolute velocity [m/s]
 #   T0      = stagnation temperature [K]
@@ -305,82 +375,43 @@ def get_efficiency(h02s: float, h02: float, h01: float, machine_type):
 #   gamma   = ratio of specific heats [-]
 #   R       = specific gas constant [J/(kg K)]
 #
-# Other inputs:
-# eps      = density convergence tolerance
-# max_iter = maximum permitted number of density iterations
-#
-# Returns a FlowState containing the converged static, stagnation,
-# and velocity properties at the station.
-def solve_station(inlet: FlowState, blade: BladeParams, fluid: IdealGas, eps = 1e-12, max_iter = 1000):
+# Returns a FlowState containing the static properties
+def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> ControlVolume:
 
-    # Inlet variables
-    m_dot = inlet.m_dot
-    c_theta = inlet.c_theta
-    T0 = inlet.T0
-    P0 = inlet.P0
+    # state variables
+    m = state.m
+    E = state.E
 
-    # Blade variables
-    A = blade.A
-
-    # Fluid variables
-    gamma = fluid.gamma
+    # fluid variables
     R = fluid.R
+    c_v = fluid.c_v
 
-    # Calculate the constant-pressure specific heat for a calorically
-    # perfect gas:
-    c_p = gamma * R / (gamma - 1)
+    # params
+    m_dot_in = params.m_dot_in
+    K = params.K
+    P_d = params.P_d
+    V = params.V
+    h0_in = params.h0_in
 
-    # Initial guess for density [kg/m^3].
-    rho = 1
+    # Calculate rho, T and P
+    thermo_state = get_state_from_conserved(m, E, V, R, c_v)
 
-    for n in range(max_iter):
+    rho = thermo_state.rho
+    P = thermo_state.P
+    T = thermo_state.T
 
-        # Calculate meridional velocity using conservation of mass:
-        c_x = m_dot / (rho * A)
+    # Calculate flow rate
+    m_dot_out = get_m_dot_out(K, P, P_d)
 
-        # Calculate the magnitude of the absolute velocity from its
-        # meridional and tangential components:
-        c = np.sqrt(c_x**2 + c_theta**2)
-
-        # Convert stagnation temperature to static temperature using
-        # the steady-flow energy relationship:
-        T = T0 - c**2/(2*c_p)
-
-        # Calculate the local speed of sound using the static
-        # temperature:
-        a = np.sqrt(gamma * R * T)
-
-        # Calculate the absolute Mach number:
-        M = c/a
-
-        # Calculate static pressure from stagnation pressure using the
-        # isentropic perfect-gas stagnation/static pressure relation:
-        P = P0 / ((1 + M**2 * (gamma - 1)/2) ** (gamma/(gamma - 1)))
-
-        # Calculate a new density from the ideal-gas equation of state:
-        new_rho = P / (R * T)
-
-        # Check whether the density has converged.
-        if abs(rho - new_rho) < eps:
-            rho = new_rho
-            break
-
-        rho = new_rho
-
-    # Error message if exceed max iterations
-    else:
-        raise RuntimeError("Density iteration did not converge")
-
-    # Package the converged station properties into a FlowState object.
-    return FlowState(
+    return ControlVolume(
+        outlet= FlowState(
+        rho=rho,
         P=P,
         T=T,
-        rho=rho,
-        P0=P0,
-        T0=T0,
-        c_x=c_x,
-        c_theta=c_theta,
-        M=M
+        ),
+        m_dot_out=m_dot_out,
+        m_dot_in=m_dot_in,
+        h0_out=h0_in
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -400,7 +431,7 @@ def solve_station(inlet: FlowState, blade: BladeParams, fluid: IdealGas, eps = 1
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
+def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, params: ControlVolume) -> ComponentResults:
 
     # Inlet variables
     c_z = inlet.c_x
@@ -417,6 +448,10 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
     gamma = fluid.gamma
     c_p = fluid.c_p
 
+    # Params
+    h0_in = params.h0_in
+    m_dot_in = params.m_dot_in
+
     # Shaft speed
     U = get_U(r_m, omega)
 
@@ -429,6 +464,9 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
     # Update stagnations thermodynamic states
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
+    h0_out = h0_in + delta_h0
+
+    m_dot_out = m_dot_in
 
     # Package the results into a RotorResults object
     return ComponentResults(
@@ -437,8 +475,14 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
         P0=P_02,
         T0=T_02
         ),
-        omega=omega,
-        delta_h0=delta_h0
+        state= SystemState(
+        omega=omega
+        ),
+        params= ControlVolume(
+        h0_out=h0_out,
+        m_dot_out=m_dot_out
+        ),
+        delta_h0=delta_h0,
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -451,7 +495,7 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 #
 # Returns a StatorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_axial_stator(inlet: FlowState, blade: BladeParams):
+def solve_axial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults:
 
     # Inlet variables
     c_z = inlet.c_x
@@ -492,7 +536,7 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams):
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
+def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x
@@ -532,7 +576,9 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
         P0=P_02,
         T0=T_02
         ),
-        omega=omega,
+        state= SystemState(
+        omega=omega
+        ),
         delta_h0=delta_h0
     )
 
@@ -546,7 +592,7 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas):
 #
 # Returns a StatorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_stator(inlet: FlowState, blade: BladeParams):
+def solve_radial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x
@@ -572,96 +618,67 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams):
         )
     )
 
-def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_params: TimeParams, machine_type, flow_geometry):
+def derivatives(state1: SystemState,
+                state2: SystemState,
+                inlet: FlowState, 
+                blade: BladeParams, 
+                fluid: IdealGas,
+                params: ControlVolume) -> Derivatives:
 
-    n_steps = time_params.n_steps
+    station1 = solve_CV(state1, fluid, params)
 
-    for n in range(n_steps):
+    rotor = solve_axial_rotor(station1.outlet, blade, fluid, station1)
 
-        station_1 = solve_station(inlet, blade, fluid)
+    station2 = solve_CV(state2, fluid, rotor.params)
 
-        if machine_type == MachineType.COMPRESSOR:
+    stator = solve_axial_stator(station2.outlet, blade)
 
-            if flow_geometry == FlowGeometry.AXIAL:
 
-                compressor_rotor = solve_axial_rotor(station_1, blade, fluid)
+    dm_dt1 = get_dm_dt(station1.m_dot_in, station1.m_dot_out)
+    dE_dt1 = get_dE_dt(station1.m_dot_in, station1.m_dot_out, station1.h0_in, station1.h0_out, station1.W_s_dot, station1.Q_dot)
 
-                omega = compressor_rotor.omega
-                delta_h0 = compressor_rotor.delta_h0
+    dm_dt2 = get_dm_dt(station2.m_dot_in, station2.m_dot_out)
+    dE_dt2 = get_dE_dt(station2.m_dot_in, station2.m_dot_out, station2.h0_in, station2.h0_out, station2.W_s_dot, station2.Q_dot)    
 
-                station_2 = solve_station(compressor_rotor.outlet, blade, fluid)
+    power = get_power(rotor.delta_h0, rotor.outlet.m_dot)
+    torque = get_torque(power, rotor.state.omega)
 
-                compressor_stator = solve_axial_stator(station_2, blade)
+    domega_dt = get_domega_dt(torque, blade.tau_load, blade.I)
 
-                station_3 = solve_station(compressor_stator.outlet, blade, fluid)
+    return Derivatives(
+        dm_dt1=dm_dt1,
+        dm_dt2=dm_dt2,
+        dE_dt1=dE_dt1,
+        dE_dt2=dE_dt2,
+        domega_dt=domega_dt
+    )
 
-            elif flow_geometry == FlowGeometry.RADIAL:
+def forward_Euler(derivatives: Derivatives, state: SystemState, time_params: TimeParams) -> SystemState:
 
-                compressor_rotor = solve_radial_rotor(station_1, blade, fluid)
+    dm_dt1 = derivatives.dm_dt1
+    dm_dt2 = derivatives.dm_dt2
+    dE_dt1 = derivatives.dE_dt1
+    dE_dt2 = derivatives.dE_dt2
+    domega_dt = derivatives.domega_dt
 
-                omega = compressor_rotor.omega
-                delta_h0 = compressor_rotor.delta_h0
+    m1 = state.m
+    m2 = state.m
+    E1 = state.E
+    E2 = state.E
+    omega = state.omega
 
-                station_2 = solve_station(compressor_rotor.outlet, blade, fluid)
+    delta_t = time_params.delta_t
 
-                compressor_stator = solve_radial_stator(station_2, blade)
-
-                station_3 = solve_station(compressor_stator.outlet, blade, fluid)
-
-            else:
-                raise RuntimeError("Flow type not defined")
-
-        elif machine_type == MachineType.TURBINE:
-
-            if flow_geometry == FlowGeometry.AXIAL:
-
-                turbine_stator = solve_axial_stator(station_1, blade)
-
-                station_2 = solve_station(turbine_stator.outlet, blade, fluid)
-
-                turbine_rotor = solve_axial_rotor(station_2, blade, fluid)
-
-                omega = turbine_rotor.omega
-                delta_h0 = turbine_rotor.delta_h0
-
-                station_3 = solve_station(turbine_rotor.outlet, blade, fluid)
-
-            elif flow_geometry == FlowGeometry.RADIAL:
-
-                turbine_stator = solve_radial_stator(station_1, blade)            
-
-                station_2 = solve_station(turbine_rotor.outlet, blade, fluid)
-
-                turbine_rotor = solve_radial_rotor(station_2, blade, fluid)
-
-                omega = turbine_rotor.omega
-                delta_h0 = turbine_rotor.delta_h0
-
-                station_3 = solve_station(turbine_stator.outlet, blade, fluid)
-
-            else:
-                raise RuntimeError("Flow type not defined")
-
-        else:
-            raise RuntimeError("Machine type not defined")
-
-        m_dot = inlet.m_dot
-
-        power = get_power(delta_h0, m_dot)
-        torque = get_torque(power, omega)
-
-        tau_load = blade.tau_load
-        I = blade.I
-
-        delta_t = time_params.delta_t
-
-        domega_dt = (torque - tau_load) / I
-
-        omega_new = omega + delta_t * domega_dt
-
-        omega = omega_new
+    m1_new = m1 + delta_t * dm_dt1
+    m2_new = m2 + delta_t * dm_dt2
+    E1_new = E1 + delta_t * dE_dt1
+    E2_new = E2 + delta_t * dE_dt2
+    omega_new = omega + delta_t * domega_dt
 
     return SystemState(
-        outlet=station_3,
-        omega=omega
+        m1_new = m1_new,
+        m2_new = m2_new,
+        E1_new = E1_new,
+        E2_new = E2_new,
+        omega_new = omega_new
     )

@@ -11,14 +11,14 @@ class FlowState:
     c_x: float  # Absolute axial/meridional velocity
     c_theta: float  # Absolute whirl velocity
     M: float    # Mach number
-    alpha: float    # Inlet angle
-    beta: float     # Exit angle
-    m_dot: float    # Flow rate
+    h0: float
+
 
 @dataclass(frozen=True)
 class ComponentResults:
     outlet: FlowState
-    omega: float = 0.0
+    state: SystemState
+    params: ControlVolume
     delta_h0: float = 0.0 # Change in total enthalpy
     Power: float = 0.0
     Torque: float = 0.0
@@ -44,7 +44,6 @@ class BladeParams:
     s: float    # Blade Pitch
     A: float    # Flow path area
     h: float    # Blade height
-    N: float    # Rotational speed
     tau_load: float
     I: float
     r_1: float = None
@@ -72,7 +71,28 @@ class TimeParams:
 
 @dataclass(frozen=True)
 class SystemState:
-    outlet: FlowState
+    V: float
     omega: float
     m: float = 0.0
     E: float = 0.0
+
+@dataclass(frozen=True)
+class ControlVolume:
+    outlet: FlowState
+    m_dot_out: float = 0.0
+    m_dot_in: float = 0.0
+    h0_in: float = 0.0   # stagnation enthalpy
+    h0_out: float = 0.0
+    W_s_dot: float = 0.0
+    Q_dot: float = 0.0
+    V: float = 0.0    # Volume of CV
+    K: float = 0.0
+    P_d: float = 0.0
+
+@dataclass(frozen=True)
+class Derivatives:
+    dm_dt1: float
+    dm_dt2: float
+    dE_dt1: float
+    dE_dt2: float
+    domega_dt: float
