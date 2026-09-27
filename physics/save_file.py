@@ -182,3 +182,33 @@ def forward_euler(inlet: FlowState, blade: BladeParams, fluid: IdealGas, time_pa
         outlet=station_3,
         omega=omega
     )
+
+def forward_Euler(derivatives: Derivatives, state: SystemState, time_params: TimeParams) -> SystemState:
+
+    dm_dt1 = derivatives.dm_dt1
+    dm_dt2 = derivatives.dm_dt2
+    dE_dt1 = derivatives.dE_dt1
+    dE_dt2 = derivatives.dE_dt2
+    domega_dt = derivatives.domega_dt
+
+    m1 = state.m
+    m2 = state.m
+    E1 = state.E
+    E2 = state.E
+    omega = state.omega
+
+    delta_t = time_params.delta_t
+
+    m1_new = m1 + delta_t * dm_dt1
+    m2_new = m2 + delta_t * dm_dt2
+    E1_new = E1 + delta_t * dE_dt1
+    E2_new = E2 + delta_t * dE_dt2
+    omega_new = omega + delta_t * domega_dt
+
+    return SystemState(
+        m1_new = m1_new,
+        m2_new = m2_new,
+        E1_new = E1_new,
+        E2_new = E2_new,
+        omega_new = omega_new
+    )

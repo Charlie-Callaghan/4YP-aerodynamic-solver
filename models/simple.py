@@ -79,6 +79,7 @@ class SystemState:
 @dataclass(frozen=True)
 class ControlVolume:
     outlet: FlowState
+    derivatives: Derivatives
     m_dot_out: float = 0.0
     m_dot_in: float = 0.0
     h0_in: float = 0.0   # stagnation enthalpy
@@ -96,3 +97,9 @@ class Derivatives:
     dE_dt1: float
     dE_dt2: float
     domega_dt: float
+
+@dataclass(frozen=True)
+class MachineEvaluation:
+    outlet: FlowState
+    params: ControlVolume
+    dervatives: Derivatives

@@ -402,6 +402,7 @@ def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> Cont
 
     # Calculate flow rate
     m_dot_out = get_m_dot_out(K, P, P_d)
+    h0_out = h0_in
 
     return ControlVolume(
         outlet= FlowState(
@@ -409,9 +410,8 @@ def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> Cont
         P=P,
         T=T,
         ),
-        m_dot_out=m_dot_out,
-        m_dot_in=m_dot_in,
-        h0_out=h0_in
+        m_dot_in=m_dot_out,
+        h0_in=h0_out
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -479,8 +479,8 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, par
         omega=omega
         ),
         params= ControlVolume(
-        h0_out=h0_out,
-        m_dot_out=m_dot_out
+        h0_in=h0_out,
+        m_dot_in=m_dot_out
         ),
         delta_h0=delta_h0,
     )
@@ -495,7 +495,7 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, par
 #
 # Returns a StatorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_axial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults:
+def solve_axial_stator(inlet: FlowState, blade: BladeParams, params: ControlVolume) -> ComponentResults:
 
     # Inlet variables
     c_z = inlet.c_x
@@ -505,6 +505,10 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults
     # Blade variables
     alpha2 = blade.alpha
 
+    # Params
+    m_dot_in = params.m_dot_in
+    h0_in = params.h0_in
+
     # Velocity triangles
     c_theta2 = get_ctheta_from_alpha(c_z, alpha2)
 
@@ -512,12 +516,19 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults
     T_02 = T_01
     P_02 = P_01
 
+    m_dot_out = m_dot_in
+    h0_out = h0_in
+
     # Package the results into a StatorResults object
     return ComponentResults(
         outlet= FlowState(
         c_theta=c_theta2,
         P0=P_02,
         T0=T_02
+        ),
+        params= ControlVolume(
+        h0_in=h0_out,
+        m_dot_in=m_dot_out
         )
     )
 
@@ -536,7 +547,7 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) -> ComponentResults:
+def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, params: ControlVolume) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x
@@ -555,6 +566,10 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) ->
     R = fluid.R
     c_p = fluid.c_p
 
+    # Params
+    h0_in = params.h0_in
+    m_dot_in = params.m_dot_in
+
     # Shaft speed
     U_1 = get_U(r_1, omega)
     U_2 = get_U(r_2, omega)
@@ -569,6 +584,9 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) ->
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
 
+    h0_out = h0_in + delta_h0
+    m_dot_out = m_dot_in
+
     # Package the results into a RotorResults object
     return ComponentResults(
         outlet= FlowState(
@@ -578,6 +596,10 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) ->
         ),
         state= SystemState(
         omega=omega
+        ),
+        params=ControlVolume(
+        h0_in=h0_out,
+        m_dot_in=m_dot_out
         ),
         delta_h0=delta_h0
     )
@@ -592,7 +614,7 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas) ->
 #
 # Returns a StatorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResults:
+def solve_radial_stator(inlet: FlowState, blade: BladeParams, params: ControlVolume) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x
@@ -602,6 +624,10 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResult
     # Blade variables
     alpha2 = blade.alpha
 
+    # Params
+    h0_in = params.h0_in
+    m_dot_in = params.m_dot_in
+
     # Velocity triangles
     c_theta2 = get_ctheta_from_alpha(c_m, alpha2)
 
@@ -609,76 +635,18 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams) -> ComponentResult
     T_02 = T_01
     P_02 = P_01
 
+    h0_out = h0_in
+    m_dot_out = m_dot_in
+
     # Package the results into a StatorResults object
     return ComponentResults(
         outlet= FlowState(
         c_theta=c_theta2,
         P0=P_02,
         T0=T_02
+        ),
+        params= ControlVolume(
+        h0_in=h0_out,
+        m_dot_in=m_dot_out
         )
-    )
-
-def derivatives(state1: SystemState,
-                state2: SystemState,
-                inlet: FlowState, 
-                blade: BladeParams, 
-                fluid: IdealGas,
-                params: ControlVolume) -> Derivatives:
-
-    station1 = solve_CV(state1, fluid, params)
-
-    rotor = solve_axial_rotor(station1.outlet, blade, fluid, station1)
-
-    station2 = solve_CV(state2, fluid, rotor.params)
-
-    stator = solve_axial_stator(station2.outlet, blade)
-
-
-    dm_dt1 = get_dm_dt(station1.m_dot_in, station1.m_dot_out)
-    dE_dt1 = get_dE_dt(station1.m_dot_in, station1.m_dot_out, station1.h0_in, station1.h0_out, station1.W_s_dot, station1.Q_dot)
-
-    dm_dt2 = get_dm_dt(station2.m_dot_in, station2.m_dot_out)
-    dE_dt2 = get_dE_dt(station2.m_dot_in, station2.m_dot_out, station2.h0_in, station2.h0_out, station2.W_s_dot, station2.Q_dot)    
-
-    power = get_power(rotor.delta_h0, rotor.outlet.m_dot)
-    torque = get_torque(power, rotor.state.omega)
-
-    domega_dt = get_domega_dt(torque, blade.tau_load, blade.I)
-
-    return Derivatives(
-        dm_dt1=dm_dt1,
-        dm_dt2=dm_dt2,
-        dE_dt1=dE_dt1,
-        dE_dt2=dE_dt2,
-        domega_dt=domega_dt
-    )
-
-def forward_Euler(derivatives: Derivatives, state: SystemState, time_params: TimeParams) -> SystemState:
-
-    dm_dt1 = derivatives.dm_dt1
-    dm_dt2 = derivatives.dm_dt2
-    dE_dt1 = derivatives.dE_dt1
-    dE_dt2 = derivatives.dE_dt2
-    domega_dt = derivatives.domega_dt
-
-    m1 = state.m
-    m2 = state.m
-    E1 = state.E
-    E2 = state.E
-    omega = state.omega
-
-    delta_t = time_params.delta_t
-
-    m1_new = m1 + delta_t * dm_dt1
-    m2_new = m2 + delta_t * dm_dt2
-    E1_new = E1 + delta_t * dE_dt1
-    E2_new = E2 + delta_t * dE_dt2
-    omega_new = omega + delta_t * domega_dt
-
-    return SystemState(
-        m1_new = m1_new,
-        m2_new = m2_new,
-        E1_new = E1_new,
-        E2_new = E2_new,
-        omega_new = omega_new
     )
