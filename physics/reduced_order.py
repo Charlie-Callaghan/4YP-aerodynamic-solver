@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState, ControlVolume, Derivatives
+from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState, ControlVolume
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -215,6 +215,19 @@ def get_mach(c: float, T: float, gamma: float, R: float):
 def get_delta_h_from_velocity(c_1: float, c_2: float):
     return (c_2**2 - c_1**2)/2
 
+# Get the new stagnaytion enthalpy using delta_h0
+#
+# h0_out = h0_in + delta_h0
+#
+# units: J/kg
+def get_h0_out(h0_in: float, delta_h0: float):
+    return h0_in + delta_h0
+
+# Get the exit stagnation pressure from inlet P0.
+#
+# P02 = P_01 * (T_02/T_01)^(gamma/(gamma-1))
+#
+# units: N/m^2
 def get_P02_from_P01(P_01: float, T_02: float, T_01: float, gamma: float):
     return P_01 * (T_02/T_01)**(gamma/(gamma-1))
 
@@ -376,7 +389,13 @@ def get_domega_dt(torque: float, tau_load: float, I: float):
 #   R       = specific gas constant [J/(kg K)]
 #
 # Returns a FlowState containing the static properties
-def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> ControlVolume:
+def solve_CV(inlet: FlowState, state: SystemState, fluid: IdealGas, params: ControlVolume) -> ControlVolume:
+
+    # Inlet variables
+    c_x = inlet.c_x
+    c_theta = inlet.c_theta
+
+    c = get_c(c_x, c_theta)
 
     # state variables
     m = state.m
@@ -384,7 +403,9 @@ def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> Cont
 
     # fluid variables
     R = fluid.R
+    gamma = fluid.gamma
     c_v = fluid.c_v
+    c_p = fluid.c_p
 
     # params
     m_dot_in = params.m_dot_in
@@ -400,15 +421,24 @@ def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> Cont
     P = thermo_state.P
     T = thermo_state.T
 
-    # Calculate flow rate
+    # Calculate exit flow rate
     m_dot_out = get_m_dot_out(K, P, P_d)
+
+    # Get velocity terms
+    M = get_mach(c, T, gamma, R)
+
+    # Find stagnation thermodynamic terms
     h0_out = h0_in
+    T0 = get_T0_from_T(T, c, c_p)
+    P0 = get_P0_from_P(P, gamma, M)
 
     return ControlVolume(
         outlet= FlowState(
         rho=rho,
         P=P,
         T=T,
+        P0=P0,
+        T0=T0
         ),
         m_dot_in=m_dot_out,
         h0_in=h0_out
@@ -431,7 +461,7 @@ def solve_CV(state: SystemState, fluid: IdealGas, params: ControlVolume) -> Cont
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, params: ControlVolume) -> ComponentResults:
+def solve_axial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type: MachineType) -> ComponentResults:
 
     # Inlet variables
     c_z = inlet.c_x
@@ -439,8 +469,10 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, par
     T_01 = inlet.T0
     c_theta1 = inlet.c_theta
 
+    # Omega state
+    omega = state.omega
+
     # Blade variables
-    omega = blade.N * 2 * np.pi / 60
     r_m = blade.r_m
     beta2 = blade.beta
 
@@ -464,9 +496,13 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, par
     # Update stagnations thermodynamic states
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
-    h0_out = h0_in + delta_h0
+    h0_out = get_h0_out(h0_in, delta_h0)
 
+    # Get outlet flow rate
     m_dot_out = m_dot_in
+
+    # Find the pressure ratio
+    PR = get_pressure_ratio(P_01, P_02, machine_type)
 
     # Package the results into a RotorResults object
     return ComponentResults(
@@ -483,6 +519,7 @@ def solve_axial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, par
         m_dot_in=m_dot_out
         ),
         delta_h0=delta_h0,
+        PR=PR
     )
 
 # Solve the thermodynamic and velocity state across a single axial
@@ -513,11 +550,12 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams, params: ControlVolu
     c_theta2 = get_ctheta_from_alpha(c_z, alpha2)
 
     # Update thermodynamic stagnation states
+    h0_out = h0_in
     T_02 = T_01
     P_02 = P_01
 
+    # Get outlet flow rate
     m_dot_out = m_dot_in
-    h0_out = h0_in
 
     # Package the results into a StatorResults object
     return ComponentResults(
@@ -547,7 +585,7 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams, params: ControlVolu
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, params: ControlVolume) -> ComponentResults:
+def solve_radial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type: MachineType) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x
@@ -555,11 +593,13 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, pa
     T_01 = inlet.T0
     c_theta1 = inlet.c_theta
 
+    # State variables
+    omega = state.omega
+
     # Blade variables
     r_1 = blade.r_1
     r_2 = blade.r_2
     beta2 = blade.beta
-    omega = 2 * np.pi * blade.N / 60
 
     # Fluid variables
     gamma = fluid.gamma
@@ -583,9 +623,13 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, pa
     # Update thermodynamic stagnation states
     T_02 = get_T02_from_T01(T_01, delta_h0, c_p)
     P_02 = get_P02_from_P01(P_01, T_02, T_01, gamma)
+    h0_out = get_h0_out(h0_in, delta_h0)
 
-    h0_out = h0_in + delta_h0
+    # Get outlet flow rate
     m_dot_out = m_dot_in
+
+    # Find the pressure ratio
+    PR = get_pressure_ratio(P_01, P_02, machine_type)
 
     # Package the results into a RotorResults object
     return ComponentResults(
@@ -601,7 +645,8 @@ def solve_radial_rotor(inlet: FlowState, blade: BladeParams, fluid: IdealGas, pa
         h0_in=h0_out,
         m_dot_in=m_dot_out
         ),
-        delta_h0=delta_h0
+        delta_h0=delta_h0,
+        PR=PR
     )
 
 # Solve the thermodynamic and velocity state across a single radial
@@ -634,8 +679,9 @@ def solve_radial_stator(inlet: FlowState, blade: BladeParams, params: ControlVol
     # Update thermodynamic stagnation states
     T_02 = T_01
     P_02 = P_01
-
     h0_out = h0_in
+
+    # Get outlet flow rate
     m_dot_out = m_dot_in
 
     # Package the results into a StatorResults object

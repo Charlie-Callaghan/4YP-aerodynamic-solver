@@ -22,6 +22,7 @@ class ComponentResults:
     delta_h0: float = 0.0 # Change in total enthalpy
     Power: float = 0.0
     Torque: float = 0.0
+    PR: float = 0.0
 
 @dataclass(frozen=True)
 class IdealGas:
