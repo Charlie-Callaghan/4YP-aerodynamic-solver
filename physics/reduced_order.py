@@ -1,5 +1,5 @@
 import numpy as np
-from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, MachineType, FlowGeometry, TimeParams, SystemState, ControlVolume
+from models.simple import FlowState,BladeParams,IdealGas,ComponentResults, Machine, SystemState, ControlVolume
 
 # In the following section a few things must be noted:
 # - all angles are in radians
@@ -266,9 +266,9 @@ def get_power(delta_h0: float, m_dot: float):
 #
 # Unit: -
 def get_pressure_ratio(P0_in: float, P0_out: float, machine_type):
-    if machine_type == MachineType.TURBINE:
+    if machine_type == Machine.machine_type.TURBINE:
         return P0_in/P0_out
-    elif machine_type == MachineType.COMPRESSOR:
+    elif machine_type == Machine.machine_type.COMPRESSOR:
         return P0_out/P0_in
     else:
         raise RuntimeError("Machine type not defined")
@@ -298,10 +298,10 @@ def get_h02s(T01:float, P02: float, P01: float, c_p: float, gamma: float):
 # Units: -
 def get_efficiency(h02s: float, h02: float, h01: float, machine_type):
 
-    if machine_type == MachineType.COMPRESSOR:
+    if machine_type == Machine.machine_type.COMPRESSOR:
         return (h02s - h01) / (h02 - h01)
 
-    elif machine_type == MachineType.TURBINE:
+    elif machine_type == Machine.machine_type.TURBINE:
         return (h01 - h02) / (h01 - h02s)
 
     else:
@@ -461,7 +461,7 @@ def solve_CV(inlet: FlowState, state: SystemState, fluid: IdealGas, params: Cont
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_axial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type: MachineType) -> ComponentResults:
+def solve_axial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type) -> ComponentResults:
 
     # Inlet variables
     c_z = inlet.c_x
@@ -585,7 +585,7 @@ def solve_axial_stator(inlet: FlowState, blade: BladeParams, params: ControlVolu
 #
 # Returns a RotorResults object containing the stagnation,
 # and velocity properties at the rotor exit.
-def solve_radial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type: MachineType) -> ComponentResults:
+def solve_radial_rotor(inlet: FlowState, state: SystemState, blade: BladeParams, fluid: IdealGas, params: ControlVolume, machine_type: Machine) -> ComponentResults:
 
     # Inlet variables
     c_m = inlet.c_x

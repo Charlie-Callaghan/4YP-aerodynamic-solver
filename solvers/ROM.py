@@ -1,5 +1,6 @@
 from physics.reduced_order import solve_axial_rotor, solve_axial_stator, solve_radial_rotor, solve_radial_stator, solve_CV, get_dE_dt, get_dm_dt, get_power, get_torque, get_domega_dt
-from models.simple import BladeParams,IdealGas, SystemState, ControlVolume, Derivatives, MachineEvaluation, MachineType
+from models.simple import BladeParams,IdealGas, SystemState, ControlVolume, Derivatives, MachineEvaluation, Machine
+from config.machines import axial_compressor, axial_turbine, radial_compressor, radial_turbine, francis_turbine
 
 # Evaluate the state derivatives of an axial compressor for one time step.
 #
@@ -18,13 +19,13 @@ def evaluate_axial_compressor(state1: SystemState,
                 blade: BladeParams, 
                 fluid: IdealGas,
                 inlet: ControlVolume,
-                machine_type: MachineType) -> Derivatives:
+                machine: Machine) -> Derivatives:
 
     # Find density and thermodynamic states of fluid at CV1
     station1 = solve_CV(inlet.outlet, state1, fluid, inlet)
 
     # Find enthalpy change and stagnation states across rotor
-    rotor = solve_axial_rotor(station1.outlet, state1, blade, fluid, station1, machine_type)
+    rotor = solve_axial_rotor(station1.outlet, state1, blade, fluid, station1, machine)
 
     # Find density and thermodynamic states of fluid at CV2    
     station2 = solve_CV(rotor.outlet, state2, fluid, rotor.params)
@@ -78,7 +79,7 @@ def evaluate_axial_turbine(state1: SystemState,
                 blade: BladeParams, 
                 fluid: IdealGas,
                 inlet: ControlVolume,
-                machine_type: MachineType) -> Derivatives:
+                machine: Machine) -> Derivatives:
 
     # Find density and thermodynamic states of fluid at CV1
     station1 = solve_CV(inlet.outlet, state1, fluid, inlet)
@@ -90,7 +91,7 @@ def evaluate_axial_turbine(state1: SystemState,
     station2 = solve_CV(stator.outlet, state2, fluid, stator.params)
 
     # Find enthalpy change and stagnation states across rotor
-    rotor = solve_axial_rotor(station2.outlet, state1, blade, fluid, station2, machine_type)
+    rotor = solve_axial_rotor(station2.outlet, state1, blade, fluid, station2, machine)
 
     # Get the derivatives of m1 and E1 through ODE's
     dm_dt1 = get_dm_dt(station1.m_dot_in, station1.m_dot_out)
@@ -137,13 +138,13 @@ def evaluate_radial_compressor(state1: SystemState,
                 blade: BladeParams, 
                 fluid: IdealGas,
                 inlet: ControlVolume,
-                machine_type: MachineType) -> Derivatives:
+                machine: Machine) -> Derivatives:
 
     # Find density and thermodynamic states of fluid at CV1
     station1 = solve_CV(inlet.outlet, state1, fluid, inlet)
 
     # Find enthalpy change and stagnation states across rotor
-    rotor = solve_radial_rotor(station1.outlet, state1, blade, fluid, station1, machine_type)
+    rotor = solve_radial_rotor(station1.outlet, state1, blade, fluid, station1, machine)
 
     # Find density and thermodynamic states of fluid at CV2
     station2 = solve_CV(rotor.outlet, state2, fluid, rotor.params)
@@ -196,7 +197,7 @@ def evaluate_radial_turbine(state1: SystemState,
                 blade: BladeParams, 
                 fluid: IdealGas,
                 inlet: ControlVolume,
-                machine_type: MachineType) -> Derivatives:
+                machine: Machine) -> Derivatives:
 
     # Find density and thermodynamic states of fluid at CV1
     station1 = solve_CV(inlet.outlet, state1, fluid, inlet)
@@ -208,7 +209,7 @@ def evaluate_radial_turbine(state1: SystemState,
     station2 = solve_CV(stator.outlet, state2, fluid, stator.params)
 
     # Find enthalpy change and stagnation states across rotor
-    rotor = solve_radial_rotor(station2.outlet, state1, blade, fluid, station2, machine_type)
+    rotor = solve_radial_rotor(station2.outlet, state1, blade, fluid, station2, machine)
 
     # Get the derivatives of m1 and E1 through ODE's
     dm_dt1 = get_dm_dt(station1.m_dot_in, station1.m_dot_out)
